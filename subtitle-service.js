@@ -264,6 +264,7 @@ function createSubtitleOption(args, subtitle, config) {
         targetLanguage: config.stremioTargetLanguage,
         subtitleId: subtitle.id,
         subtitleUrl: subtitle.url,
+        translationProvider: translationProvider(config),
     });
 
     if (!jobs.get(key)) {

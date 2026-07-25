@@ -133,6 +133,28 @@ async function getGeneratedSubtitleResponse(key) {
         });
     }
 
+    if (job.preferredCacheKey) {
+        const preferredSubtitle = await getCachedGeneratedSubtitle(job.preferredCacheKey);
+        if (preferredSubtitle) {
+            logger.debug("generated subtitle preferred-cache hit", {
+                key,
+                preferredCacheKey: job.preferredCacheKey,
+                source: preferredSubtitle.source,
+            });
+            recordGeneratedSubtitleCache("preferred_hit");
+            await setCachedGeneratedSubtitle(key, preferredSubtitle.vtt);
+            if (jobs.get(key) === job) jobs.delete(key);
+            logGeneratedSubtitleServed({
+                cacheSource: preferredSubtitle.source,
+                key,
+                source: "preferred-cache",
+                startedAt,
+                vtt: preferredSubtitle.vtt,
+            });
+            return generatedSubtitleResponse(preferredSubtitle.vtt);
+        }
+    }
+
     const source = job.promise ? "joined" : "build";
     if (!job.promise) {
         logger.info("generated subtitle build queued", { key });
@@ -257,19 +279,27 @@ function logGeneratedSubtitleServed({ cacheSource, diagnostic, error, key, sourc
 }
 
 function createSubtitleOption(args, subtitle, config) {
-    const key = hashKey({
+    const cacheKeyFields = {
         type: args.type,
         id: args.id,
         sourceLanguage: config.stremioSourceLanguage,
         targetLanguage: config.stremioTargetLanguage,
         subtitleId: subtitle.id,
         subtitleUrl: subtitle.url,
-    });
+    };
+    const provider = translationProvider(config);
+    const key = hashKey({ ...cacheKeyFields, translationProvider: provider });
+
+    // DeepL is higher quality, so a googletrans request can reuse an existing DeepL
+    // translation of the same content, but DeepL never falls back to googletrans.
+    const preferredCacheKey =
+        provider === "deepl" ? undefined : hashKey({ ...cacheKeyFields, translationProvider: "deepl" });
 
     if (!jobs.get(key)) {
         jobs.set(key, {
             key,
             config,
+            preferredCacheKey,
             subtitleUrl: subtitle.url,
             title: `OpenSubtitles v3 ${subtitle.id}`,
         });
